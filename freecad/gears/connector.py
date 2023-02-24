@@ -21,7 +21,7 @@ import copy
 import numpy as np
 import FreeCAD
 from pygears import __version__
-from .features import InvoluteGear, CycloidGear, InvoluteGearRack, CycloidGearRack, InternalInvoluteGear
+from .features import InvoluteGear, CycloidGear, InvoluteGearRack, CycloidGearRack, InternalInvoluteGear, BaseGear
 from pygears.computation import compute_shifted_gears
 
 class ViewProviderGearConnector(object):
@@ -49,19 +49,63 @@ class GearConnector(object):
         obj.addProperty("App::PropertyString", "version", "version", "freecad.gears-version", 1)
         obj.addProperty("App::PropertyLink","master_gear","gear","master gear", 1)
         obj.addProperty("App::PropertyLink","slave_gear","gear","slave gear", 1)
+        obj.addProperty("App::PropertyLink","master_gear_connector_parent","gear","master gear parent object for connector animation", 1)
+        obj.addProperty("App::PropertyLink","slave_gear_connector_parent","gear","slave gear parent object for connector animation", 1)
         obj.addProperty("App::PropertyAngle", "angle1", "gear", "angle at which second gear is placed", 0)
         obj.addProperty("App::PropertyAngle", "angle2", "gear", "angle at which second gear is placed", 1)
         obj.version = __version__
         obj.master_gear = master_gear
         obj.slave_gear = slave_gear
+        obj.master_gear_connector_parent = master_gear
+        obj.slave_gear_connector_parent = slave_gear
+
+        if not self.is_gear_subclass(obj.master_gear):
+            # print("master gear is non gear instance, searching subtree for gear itself...")
+            result = self.search_for_gear_recursive(obj.master_gear)
+            if result:
+                # print("selected first child canidate master gear %s" % result.Label)
+                obj.master_gear = result
+        if not self.is_gear_subclass(obj.slave_gear):
+            # print("slave gear is non gear instance, searching subtree for gear itself...")
+            result = self.search_for_gear_recursive(obj.slave_gear)
+            if result:
+                # print("selected first child canidate slave gear %s" % result.Label)
+                obj.slave_gear = result
+
+
         obj.angle1 = 0
         obj.angle2 = 0
         obj.Proxy = self
 
+        assert isinstance(obj.master_gear.Proxy, BaseGear)
+        assert isinstance(obj.slave_gear.Proxy, BaseGear)
+        # todo possibly only one of the above needs to be a gear, source angle/etc could be taken from anything else
+        # and gear info default to the presently available gear, allowing solids to drive gear or vice versa.
+        # With custom movement functions one or both elements could be non gears too, eg ellipsoids controlling solids, etc
+        # thinking of elongated InternalInvoluteGear or other scenarios including arbatrary physics objects attached to the
+        # gear exerting force on arbatrarily shaped secondary objects in systematic and mathematically predicatble ways,
+        # which could in turn spur more auxillary connector movements... in any anything is possible chain of update way.
+        # share your code!
+
+    def is_gear_subclass(self, possible_gear):
+        return 'Proxy' in possible_gear.PropertiesList and isinstance(possible_gear.Proxy, BaseGear)
+
+    def search_for_gear_recursive(self, gear_parent):
+        if not self.is_gear_subclass(gear_parent):
+            for child in gear_parent.OutList:
+                if self.is_gear_subclass(child):
+                    return child
+                else:
+                    match = self.search_for_gear_recursive(child)
+                    if self.is_gear_subclass(match):
+                        return match
+        else:
+            return gear_parent
+
     def onChanged(self, fp, prop):
         # fp.angle2 = fp.master_gear.Placement.Rotation.Angle
         if isinstance(fp.master_gear.Proxy, InvoluteGear) and isinstance(fp.slave_gear.Proxy, InvoluteGear):
-            angle_master = fp.master_gear.Placement.Rotation.Angle * sum(fp.master_gear.Placement.Rotation.Axis)
+            angle_master = fp.master_gear_connector_parent.Placement.Rotation.Angle * sum(fp.master_gear_connector_parent.Placement.Rotation.Axis)
             dw_master = fp.master_gear.dw
             dw_slave = fp.slave_gear.dw
             dist = (dw_master + dw_slave) / 2
@@ -85,11 +129,11 @@ class GearConnector(object):
             rot3 = FreeCAD.Rotation(FreeCAD.Vector(0,0,1), angle3).toMatrix()
             rot4 = FreeCAD.Rotation(FreeCAD.Vector(0,0,1), -angle4).toMatrix()
             mat1 = rot * mat0 * rot2 * rot3 * rot4
-            mat1.move(fp.master_gear.Placement.Base)
-            fp.slave_gear.Placement = mat1
+            mat1.move(fp.master_gear_connector_parent.Placement.Base)
+            fp.slave_gear_connector_parent.Placement = mat1
 
         if isinstance(fp.master_gear.Proxy, InternalInvoluteGear) and isinstance(fp.slave_gear.Proxy, InvoluteGear):
-            angle_master = fp.master_gear.Placement.Rotation.Angle * sum(fp.master_gear.Placement.Rotation.Axis)
+            angle_master = fp.master_gear_connector_parent.Placement.Rotation.Angle * sum(fp.master_gear_connector_parent.Placement.Rotation.Axis)
             dw_master = fp.master_gear.dw
             dw_slave = fp.slave_gear.dw
             dist = (dw_master - dw_slave) / 2
@@ -113,12 +157,12 @@ class GearConnector(object):
             rot3 = FreeCAD.Rotation(FreeCAD.Vector(0,0,1), angle3).toMatrix()
             rot4 = FreeCAD.Rotation(FreeCAD.Vector(0,0,1), -angle4).toMatrix()
             mat1 = rot * mat0 * rot2 * rot3 * rot4
-            mat1.move(fp.master_gear.Placement.Base)
-            fp.slave_gear.Placement = mat1
+            mat1.move(fp.master_gear_connector_parent.Placement.Base)
+            fp.slave_gear_connector_parent.Placement = mat1
 
         if ((isinstance(fp.master_gear.Proxy, InvoluteGear) and isinstance(fp.slave_gear.Proxy, InvoluteGearRack))
             or (isinstance(fp.master_gear.Proxy, CycloidGear) and isinstance(fp.slave_gear.Proxy, CycloidGearRack))):
-            angle_master = fp.master_gear.Placement.Rotation.Angle * sum(fp.master_gear.Placement.Rotation.Axis)
+            angle_master = fp.master_gear_connector_parent.Placement.Rotation.Angle * sum(fp.master_gear_connector_parent.Placement.Rotation.Axis)
             dw_master = fp.master_gear.dw.Value
             dw_slave = 0
             dist = -(dw_master + dw_slave) / 2
@@ -130,11 +174,11 @@ class GearConnector(object):
             mat2.move(FreeCAD.Vector(0, -np.deg2rad(fp.angle2.Value) * dw_master / 2, 0))
             rot = FreeCAD.Rotation(FreeCAD.Vector(0,0,1), fp.angle1).toMatrix()
             mat3 = rot * mat2 *mat1 * mat0
-            mat3.move(fp.master_gear.Placement.Base)
-            fp.slave_gear.Placement = mat3
+            mat3.move(fp.master_gear_connector_parent.Placement.Base)
+            fp.slave_gear_connector_parent.Placement = mat3
 
         if isinstance(fp.master_gear.Proxy, CycloidGear) and isinstance(fp.slave_gear.Proxy, CycloidGear):
-            angle_master = fp.master_gear.Placement.Rotation.Angle * sum(fp.master_gear.Placement.Rotation.Axis)
+            angle_master = fp.master_gear_connector_parent.Placement.Rotation.Angle * sum(fp.master_gear_connector_parent.Placement.Rotation.Axis)
             dw_master = fp.master_gear.dw
             dw_slave = fp.slave_gear.dw
             dist = (dw_master + dw_slave) / 2
@@ -149,8 +193,8 @@ class GearConnector(object):
             rot3 = FreeCAD.Rotation(FreeCAD.Vector(0,0,1), angle3).toMatrix()
             rot4 = FreeCAD.Rotation(FreeCAD.Vector(0,0,1), -angle4).toMatrix()
             mat1 = rot * mat0 * rot2 * rot3 * rot4
-            mat1.move(fp.master_gear.Placement.Base)
-            fp.slave_gear.Placement = mat1
+            mat1.move(fp.master_gear_connector_parent.Placement.Base)
+            fp.slave_gear_connector_parent.Placement = mat1
 
     def execute(self, fp):
         self.onChanged(fp, None)
