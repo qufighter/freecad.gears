@@ -168,12 +168,7 @@ class CreateGearConnector(BaseCommand):
 
     def Activated(self):
         gear1 = Gui.Selection.getSelection()[0]
-        assert isinstance(gear1.Proxy, BaseGear)
-
         gear2 = Gui.Selection.getSelection()[1]
-        assert isinstance(gear2.Proxy, BaseGear)
-
-        # check if selected objects are beams
 
         obj = FreeCAD.ActiveDocument.addObject("Part::FeaturePython", self.NAME)
         GearConnector(obj, gear1, gear2)
